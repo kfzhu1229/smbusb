@@ -3,7 +3,7 @@ ACLOCAL_AMFLAGS = -I autostuff
 lib_LTLIBRARIES = libsmbusb.la
 
 libsmbusb_la_SOURCES = \
-	smbusb.c \
+	smbusb-i2cdev.c \
 	libsmbusb.h \
 	fxloader.c \
 	firmware.h

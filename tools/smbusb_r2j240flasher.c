@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <getopt.h>
+#include <errno.h>
 #include <sys/types.h>
 
 #include "libsmbusb.h"
@@ -54,8 +55,9 @@
 #define DATAFLASH3_ADDRESS 0xC000
 #define DATAFLASH3_SIZE 0x2000
 
+int readRam(int address, unsigned int size, unsigned char *buf);
 
-int eraseFlashBlock(unsigned int address) {
+int eraseFlashBlock(unsigned int address, unsigned int size) {
 	int status;
 	unsigned char block[3];
 
@@ -64,13 +66,46 @@ int eraseFlashBlock(unsigned int address) {
 	block[2]=(address>>16)&0xFF;
 	status = SMBWriteBlock(0x16,CMD_ERASE_BLOCK,block,3);
 	if (status<0) return status;
-	sleep(1);
-	status = SMBReadWord(0x16,CMD_READ_CLEAR_STATUS_REG);
-	return status;
+
+    sleep(1);
+    status = SMBReadWord(0x16,CMD_READ_CLEAR_STATUS_REG);
+    if (status < 0 && errno == ETIMEDOUT && size) {
+        uint8_t *buf = malloc(size);
+        if (!buf)
+            return -1;
+
+        sleep(1);
+        int done = 0;
+        for (int i = 0; i < 10 && !done; ++i) {
+            status = readRam(address, size, buf);
+            if (status < 0) {
+                sleep(1);
+                continue;
+            }
+
+            done = 1;
+            for (int j = 0; j < size; ++j) {
+                if (buf[j] != 0xFF) {
+                    sleep(1);
+                    done = 0;
+                    break;
+                }
+            }
+        }
+
+        if (done)
+            status = 1;
+
+        free(buf);
+    }
+
+    return status;
 }
 
 
-int readRam(int address, unsigned int size, unsigned char *buf) {
+int readRam(int address, unsigned int size, unsigned char *buf)
+{
+#if 0
 	int status,i;
 	unsigned char block[0xFF];
 
@@ -88,9 +123,59 @@ int readRam(int address, unsigned int size, unsigned char *buf) {
 	status= SMBWrite(0,1,0,block,1);
 	
 	return SMBRead(size,buf,1);
+#else
+    struct SMBMsg msg[2] = {};
+
+    const size_t chunk = 64;
+
+    size_t         remain = size;
+    unsigned char *ptr = buf;
+    uint32_t       addr = address;
+
+    int sts = 0;
+    while (remain) {
+
+        const size_t cur = remain < chunk ? remain : chunk;
+
+        uint8_t send_buffer[] = {
+            CMD_READ_RAM,
+             addr & 0xFF,
+            (addr>>8)&0xFF,
+            (addr>>16)&0xFF,
+             cur&0xFF,
+            (cur>>8)&0xFF
+        };
+
+        // Write part
+        msg[0].addr = 0x16;
+        msg[0].flags = 0;
+        msg[0].len = sizeof(send_buffer);
+        msg[0].buf = send_buffer;
+
+        // Read part
+        msg[1].addr = 0x16;
+        msg[1].flags = SMB_M_RD;
+        msg[1].len = cur;
+        msg[1].buf = ptr;
+
+        sts = SMBTransfer(msg, 2);
+        if (sts < 0) {
+            fprintf(stderr, "Read RAM, sts = %d, errno %d\n", sts, errno);
+            break;
+        }
+
+        remain -= cur;
+        ptr    += cur;
+        addr   += cur;
+    }
+
+    return sts < 0 ? -1 : size;
+#endif
 }
 
-int writeRam(int address, unsigned int size, unsigned char *buf) {
+int writeRam(int address, unsigned int size, unsigned char *buf)
+{
+#if 0
 	int status,i;
 	unsigned char block[0xFF];
 
@@ -107,8 +192,58 @@ int writeRam(int address, unsigned int size, unsigned char *buf) {
 
 	status= SMBWrite(0,0,1,buf,size);
 	
-	return status;
-	
+    return status;
+#else
+    struct SMBMsg msg[1] = {};
+
+    const size_t chunk = 32 - 6;
+
+    size_t         remain = size;
+    unsigned char *ptr = buf;
+    uint32_t       addr = address;
+
+    int sts = 0;
+
+    uint8_t *send_buffer = malloc(chunk + 6);
+    if (!send_buffer)
+        return -1;
+
+    while (remain) {
+
+        const size_t cur = remain < chunk ? remain : chunk;
+
+        send_buffer[0] = CMD_WRITE_RAM;
+        send_buffer[1] = addr & 0xFF;
+        send_buffer[2] = (addr>>8)&0xFF;
+        send_buffer[3] = (addr>>16)&0xFF;
+        send_buffer[4] = cur&0xFF;
+        send_buffer[5] = (cur>>8)&0xFF;
+
+        memcpy(&send_buffer[6], ptr, cur);
+
+        //fprintf(stderr, "write len %zu, trans %lu\n", cur, cur + 6);
+
+        // Write part
+        msg[0].addr = 0x16;
+        msg[0].flags = 0;
+        msg[0].len = 6 + cur;
+        msg[0].buf = send_buffer;
+
+        sts = SMBTransfer(msg, sizeof(msg) / sizeof(*msg));
+        if (sts < 0) {
+            fprintf(stderr, "Write RAM, sts = %d, errno %d\n", sts, errno);
+            break;
+        }
+
+        remain -= cur;
+        ptr    += cur;
+        addr   += cur;
+    }
+
+    free(send_buffer);
+
+    return sts < 0 ? -1 : size;
+#endif
 }
 
 void printHeader() {
@@ -281,7 +416,7 @@ int main(int argc, char **argv)
     }
 
 	printHeader();	
-	if ((status = SMBOpenDeviceVIDPID(0x04b4,0x8613)) >0) {
+	if ((status = /*SMBOpenDeviceVIDPID(0x04b4,0x8613)*/ SMBOpenDeviceI2c("/dev/i2c-7")) >= 0) {
 		printf("SMBusb Firmware Version: %d.%d.%d\n",status&0xFF,(status >>8)&0xFF,(status >>16)&0xFF);
 	} else {
 			
@@ -361,13 +496,13 @@ int main(int argc, char **argv)
 			printf("Fixing LGC static checksum..\nDone!\n");
 		}
 
-		printf("Erasing flash block starting at 0x%04x ...\n",opAddress);
-		if (eraseFlashBlock(opAddress)>0) {
+        printf("Erasing flash block starting at 0x%04x ...\n",opAddress);
+        if (eraseFlashBlock(opAddress, opSize)>0) {
 			printf("Done!\n");
 		} else {
 			printf("ERROR!\n");
 			exit(0);
-		}
+        }
 
 
 		printf("Writing memory 0x%04x-0x%04x ...\n",opAddress,opAddress+opSize-1);
@@ -404,7 +539,7 @@ int main(int argc, char **argv)
 			exit(0);
 		}
 		printf("Erasing flash block starting at 0x%04x ...\n",opAddress);
-		if (eraseFlashBlock(opAddress)>0) {
+        if (eraseFlashBlock(opAddress, opSize)>0) {
 			printf("Done!\n");
 		} else {
 			printf("ERROR!\n");

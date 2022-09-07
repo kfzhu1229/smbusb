@@ -67,6 +67,8 @@
 
 extern int SMBOpenDeviceVIDPID(unsigned int vid,unsigned int pid);
 extern int SMBOpenDeviceBusAddr(unsigned int bus, unsigned int addr);
+extern int SMBOpenDeviceI2c(const char *dev_name);
+
 extern void SMBCloseDevice();
 extern unsigned int SMBInterfaceID();
 
@@ -90,3 +92,22 @@ extern int SMBTestCommandACK(unsigned int address, unsigned char command);
 extern int SMBTestCommandWrite(unsigned int address, unsigned char command);
 
 void SMBSetDebugLogFunc(void *logFunc);
+
+
+#ifndef _WIN32
+#include <stdint.h>
+#include <stdlib.h>
+
+struct SMBMsg {
+    uint16_t addr;
+    uint16_t flags;
+#define SMB_M_RD       0x0001
+#define SMB_M_NOSTART  0x4000
+#define SMB_M_STOP     0x8000
+    uint16_t len;
+    uint8_t *buf;
+};
+
+int SMBTransfer(struct SMBMsg *msgs, size_t count);
+
+#endif
