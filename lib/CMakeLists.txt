@@ -29,7 +29,7 @@ set(ENABLE_FX2LP_PROGRAMMER On CACHE BOOL "Enable FX2LP programmer")
 
 # i2c-dev is a Linux-specific
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    set(ENABLE_I2C_DEV_PROGRAMMER On CACHE BOOL "Enable generic i2c-dev programmers")
+    set(ENABLE_I2CDEV_PROGRAMMER On CACHE BOOL "Enable generic i2c-dev programmers")
 endif()
 
 # Warnings
@@ -53,7 +53,7 @@ if (ENABLE_FX2LP_PROGRAMMER)
     list(APPEND LIBSMBUSB_SRC smbusb-fx2lp.c fxloader.c)
 endif()
 
-if (ENABLE_I2C_DEV_PROGRAMMER)
+if (ENABLE_I2CDEV_PROGRAMMER)
     list(APPEND LIBSMBUSB_SRC smbusb-i2cdev.c)
 endif()
 
@@ -69,6 +69,13 @@ target_include_directories(smbusb
 set_target_properties(smbusb PROPERTIES PUBLIC_HEADER "libsmbusb.h")
 add_library(smbusb::smbusb ALIAS smbusb)
 
+if (ENABLE_FX2LP_PROGRAMMER)
+    target_compile_definitions(smbusb PRIVATE USE_FX2LP_PROGRAMMER=1)
+endif()
+
+if (ENABLE_I2CDEV_PROGRAMMER)
+    target_compile_definitions(smbusb PRIVATE USE_I2CDEV_PROGRAMMER=1)
+endif()
 
 # Install
 if (LIBSMBUSB_NOT_SUBPROJECT)

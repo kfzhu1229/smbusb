@@ -5,7 +5,6 @@
 #include "libsmbusb.h"
 #include "smbusb_priv.h"
 
-
 extern struct SMBDriver smbusb_fx2lp_driver;
 extern struct SMBDriver smbusb_i2cdev_driver;
 
@@ -21,16 +20,24 @@ int SMBOpenDevice(const char *device_uri)
         return -1;
     }
 
+#ifdef USE_FX2LP_PROGRAMMER
     if (!strncmp(device_uri, "fx2lp://", 8)) {
         s_drv = &smbusb_fx2lp_driver;
         device_ops = device_uri + 8; // skip "fx2lp://"
-    } else if (!strncmp(device_uri, "i2cdev://", 9)) {
+    }
+#endif
+
+#ifdef USE_I2CDEV_PROGRAMMER
+    if (!strncmp(device_uri, "i2cdev://", 9)) {
         s_drv = &smbusb_i2cdev_driver;
         device_ops = device_uri + 9; // skip "i2cdev://"
     } else if (!strncmp(device_uri, "i2c://", 6)) {
         s_drv = &smbusb_i2cdev_driver;
         device_ops = device_uri + 6; // skip "i2c://"
-    } else {
+    }
+#endif
+
+    if (!s_drv) {
         fprintf(stderr, "Unsupported device URI: \"%s\"\n", device_uri);
         return -1;
     }
