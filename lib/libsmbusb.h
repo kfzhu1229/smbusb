@@ -15,6 +15,12 @@
 * License along with this library; if not, write to the Free Software
 * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
+
+#pragma once
+
+#include <stdint.h>
+#include <stdlib.h>
+
 #ifdef _WIN32
 #include <windows.h>
 #define sleep(x) Sleep(1000*x)
@@ -65,12 +71,37 @@
 #define SMB_TEST_COMMAND_ACK 0x91
 #define SMB_TEST_COMMAND_WRITE 0x92
 
-extern int SMBOpenDeviceVIDPID(unsigned int vid,unsigned int pid);
-extern int SMBOpenDeviceBusAddr(unsigned int bus, unsigned int addr);
-extern int SMBOpenDeviceI2c(const char *dev_name);
+/**
+ * Open specific device URI with driver-specific options in driver-specific way
+ *
+ * Drivers:
+ *  * fx2lp
+ *  * i2cdev
+ *
+ * fx2lp URI:
+ *    fx2lp://<<vid=VID,pid=PID>|<bus=BUS,addr=ADDR>>
+ *   where:
+ *      VID, PID, BUS and ADDR numeric values in HEX (0xXX, XXh), OCT (0XX), BIN (0bXX) or DEC (XX) forms
+ *      VID and PID must be paired together and not mixed with BUS and ADDR and otherwise
+ *   example:
+ *      fx2lp://vid=0x04b4,pid=0x8613
+ *
+ * i2cdev URI:
+ *     i2cdev://<DEV>
+ *     i2c://<DEV>
+ *   where:
+ *     DEV is a full or relative path to the I2C device exported by the i2c-dev module
+ *   example:
+ *     i2cdev:///dev/i2c-7
+ *     i2c:///dev/i2c-7
+ *
+ * @param device_uri  URI for opening
+ * @return
+ */
+extern int SMBOpenDevice(const char *device_uri);
+extern void SMBCloseDevice(void);
 
-extern void SMBCloseDevice();
-extern unsigned int SMBInterfaceID();
+//extern unsigned int SMBInterfaceID(void);
 
 extern int SMBSendByte(unsigned int address, unsigned char command);
 extern int SMBReadByte(unsigned int address, unsigned char command);
@@ -81,22 +112,17 @@ extern int SMBReadBlock(unsigned int address, unsigned char command, unsigned ch
 extern int SMBWriteBlock(unsigned int address, unsigned char command, unsigned char *data, unsigned char len);
 
 extern void SMBEnablePEC(unsigned char state);
-extern unsigned char SMBGetLastReadPECFail();
+extern unsigned char SMBGetLastReadPECFail(void);
 
 extern int SMBWrite(unsigned char start, unsigned char restart, unsigned char stop, unsigned char *data, unsigned int len);
 extern int SMBRead(unsigned int len, unsigned char* data, unsigned char lastRead);
-extern unsigned int SMBGetArbPEC();
+extern unsigned int SMBGetArbPEC(void);
 
 extern int SMBTestAddressACK(unsigned int address);
 extern int SMBTestCommandACK(unsigned int address, unsigned char command);
 extern int SMBTestCommandWrite(unsigned int address, unsigned char command);
 
-void SMBSetDebugLogFunc(void *logFunc);
-
-
-#ifndef _WIN32
-#include <stdint.h>
-#include <stdlib.h>
+extern void SMBSetDebugLogFunc(void *logFunc);
 
 struct SMBMsg {
     uint16_t addr;
@@ -108,6 +134,5 @@ struct SMBMsg {
     uint8_t *buf;
 };
 
-int SMBTransfer(struct SMBMsg *msgs, size_t count);
+extern int SMBTransfer(struct SMBMsg *msgs, size_t count);
 
-#endif

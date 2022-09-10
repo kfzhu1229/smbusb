@@ -130,6 +130,13 @@ void printHeader() {
 void printUsage() {
 	  printHeader();
 	  printf("options:\n");
+      printf("--device=<device_uri>                  = use given device for SMBus access: fx2lp, i2cdev\n"
+             "      <device_uri> contain:\n"
+             "        <schema>://<device_definition>\n"
+             "      Example:\n"
+             "        i2cdev:///dev/i2c-7\n"
+             "        i2c:///dev/i2c-7\n"
+             "        fx2lp://vid=0x04b4,pid=0x8613\n");
 	  printf("--save-program=<file> ,  -p <file>      =   save the chip's program flash to <file>\n");
 	  printf("--save-eeprom=<file> ,   -e <file>      =   save the chip's eeprom(data) flash to <file>\n");
 	  printf("--flash-program=<file> , -f <file>      =   flash the <file> to the chip's program flash\n");
@@ -158,6 +165,7 @@ int main(int argc, char **argv)
 	FILE *outFile;
 	FILE *inFile;
 
+    const char *device = "fx2lp://vid=0x04b4,pid=0x8613";
 
 	if (argc==1) {
 		 printUsage();
@@ -167,7 +175,8 @@ int main(int argc, char **argv)
 	while (1)
 	{
 		static struct option long_options[] =
-	        {
+            {
+              {"device", required_argument, 0, 50},
 	          {"confirm-delete", no_argument,       &confirmDelete, 1},
 	          {"no-verify", no_argument,       &noVerify, 1},
 	 	  {"no-pec", no_argument,       &noPec, 1},		
@@ -193,6 +202,9 @@ int main(int argc, char **argv)
         {
         case 0:
           if (long_options[option_index].flag != 0)
+            break;
+        case 50:
+            device = optarg;
             break;
 
         case 'p':
@@ -227,7 +239,7 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	if ((status = SMBOpenDeviceVIDPID(0x04b4,0x8613)) >0) {
+    if ((status = SMBOpenDevice(device)) >0) {
 		printf("SMBusb Firmware Version: %d.%d.%d\n",status&0xFF,(status >>8)&0xFF,(status >>16)&0xFF);
 	} else {
 		printf("Error Opening SMBusb: libusb error %d\n",status);

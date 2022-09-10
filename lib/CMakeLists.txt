@@ -23,9 +23,14 @@ set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 #set(CMAKE_C_EXTENSIONS OFF) # turn on/off GNU or some other extensions
 
-find_package(Threads)
-#find_package(PkgConfig)
-find_package(LIBUSB1 REQUIRED)
+find_package(PkgConfig)
+
+set(ENABLE_FX2LP_PROGRAMMER On CACHE BOOL "Enable FX2LP programmer")
+
+# i2c-dev is a Linux-specific
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    set(ENABLE_I2C_DEV_PROGRAMMER On CACHE BOOL "Enable generic i2c-dev programmers")
+endif()
 
 # Warnings
 set (LIBSMBUSB_WARNING_OPTIONS
@@ -34,29 +39,31 @@ set (LIBSMBUSB_WARNING_OPTIONS
      $<$<CXX_COMPILER_ID:MSVC>:
        /W4>)
 
-#aux_source_directory(. SRC_LIST)
-#add_executable(${PROJECT_NAME} ${SRC_LIST})
-#target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)
-#target_compile_options(${PROJECT_NAME} PRIVATE ${${PROJECT_NAME}_WARNING_OPTIONS})
+# Dummy libs
+set(LIBS m)
 
-set(LIBSMBUSB_HDR
-    firmware.h
-    fxloader.h
-    libsmbusb.h
-    )
-set(LIBSMBUSB_SRC
-    fxloader.c
-    smbusb-i2cdev.c
-    #smbusb.c
-    )
+set(LIBSMBUSB_HDR libsmbusb.h smbusb_priv.h)
+set(LIBSMBUSB_SRC smbusb.c)
+
+if (ENABLE_FX2LP_PROGRAMMER)
+    find_package(LIBUSB1 REQUIRED)
+    list(APPEND LIBS LIBUSB1::LIBUSB1)
+    list(APPEND LIBSMBUSB_HDR
+        fxloader.h)
+    list(APPEND LIBSMBUSB_SRC smbusb-fx2lp.c fxloader.c)
+endif()
+
+if (ENABLE_I2C_DEV_PROGRAMMER)
+    list(APPEND LIBSMBUSB_SRC smbusb-i2cdev.c)
+endif()
 
 add_library(smbusb ${LIBSMBUSB_SRC} ${LIBSMBUSB_HDR})
-target_link_libraries(smbusb PRIVATE LIBUSB1::LIBUSB1)
+target_link_libraries(smbusb PRIVATE ${LIBS})
 target_compile_options(smbusb PRIVATE ${LIBSMBUSB_WARNING_OPTIONS})
 target_include_directories(smbusb
     PUBLIC
           $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}>
-          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/avcpp>
+          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
           ${CMAKE_CURRENT_LIST_DIR})
 set_target_properties(smbusb PROPERTIES PUBLIC_HEADER "libsmbusb.h")

@@ -26,6 +26,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <getopt.h>
 #include <sys/types.h>
 
 #include "libsmbusb.h"
@@ -35,6 +36,19 @@ typedef struct {
     unsigned short cell_voltage[4];
     unsigned char unknown_1[2];
 } lenovo_data_t __attribute__ ((aligned (1)));
+
+static void printUsage()
+{
+    printf("smbusb_sbsreport\n"
+           "  options:\n"
+           "    --device=<device_uri>               = use given device for SMBus access: fx2lp, i2cdev\n"
+           "      <device_uri> contain:\n"
+           "        <schema>://<device_definition>\n"
+           "      Example:\n"
+           "        i2cdev:///dev/i2c-7\n"
+           "        i2c:///dev/i2c-7\n"
+           "        fx2lp://vid=0x04b4,pid=0x8613\n");
+}
 
 int main(int argc, char*argv[])
 {
@@ -46,7 +60,31 @@ int main(int argc, char*argv[])
 	unsigned char *tempStr = malloc(256);
 	unsigned int tempWord;
 
-	if ((status = /*SMBOpenDeviceVIDPID(0x04b4,0x8613)*/SMBOpenDeviceI2c("/dev/i2c-7")) >= 0) {
+    int c;
+    const char *device_uri = "fx2lp://vid=0x04b4,pid=0x8613";
+    while (1) {
+        static struct option long_options[] = {
+            {"device", required_argument, NULL, 50},
+            {"help", no_argument, NULL, 'h'},
+            {0}
+        };
+
+        c = getopt_long(argc, argv, "hd:", long_options, NULL);
+
+        if (c == -1)
+            break;
+
+        switch (c) {
+        case 'h':
+            printUsage();
+            exit(0);
+        case 50:
+            device_uri = optarg;
+            break;
+        }
+    }
+
+    if ((status = SMBOpenDevice(device_uri)) >= 0) {
 		printf("SMBusb Firmware Version: %d.%d.%d\n",status&0xFF,(status >>8)&0xFF,(status >>16)&0xFF);
 	} else {
 		printf("Error Opening SMBusb: libusb error %d\n",status);

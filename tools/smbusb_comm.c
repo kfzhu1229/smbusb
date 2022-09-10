@@ -38,7 +38,14 @@ void printHeader() {
 }
 void printUsage() {
 	  printHeader();
-	  printf("usage:\n");
+      printf("usage:\n");
+      printf("--device=<device_uri>                  = use given device for SMBus access: fx2lp, i2cdev\n"
+             "      <device_uri> contain:\n"
+             "        <schema>://<device_definition>\n"
+             "      Example:\n"
+             "        i2cdev:///dev/i2c-7\n"
+             "        i2c:///dev/i2c-7\n"
+             "        fx2lp://vid=0x04b4,pid=0x8613\n");
 	  printf("--address=<0xaddr>    , -a <0xaddr>    =   Sets SMBus address for operation\n");
 	  printf("--command=<0xcommand> , -c <0xcommand> =   Sets SMBus command for operation\n");
 	  printf("--write=<0xdata>      , -w <0xdata>    =   Write operation\n");
@@ -80,6 +87,8 @@ int main(int argc, char **argv)
 	unsigned char buf[256];
 	char blockCheck;
 
+    const char *device = "fx2lp://vid=0x04b4,pid=0x8613";
+
 	int op=0;
 	int opAddress,opCommand = -1;
 	int opReadLen=0;
@@ -90,76 +99,77 @@ int main(int argc, char **argv)
 		 printUsage();
 		 exit(1);
 	}
-
 	
 	while (1)
 	{
-		static struct option long_options[] =
-	        {
-	 	  {"no-pec", no_argument,       &noPec, 1},		
-
-	          {"address",  required_argument, 0, 'a'},
-	          {"command",  required_argument, 0, 'c'},
-	          {"write",    required_argument, 0, 'w'},
-		  {"block-write", no_argument, 0, 'b'},
-	          {"read",    required_argument, 0, 'r'},
-	          {"null-write",  no_argument, 0, 'n'},
-	          {"verbose",  no_argument, 0, 'v'},
-
-	          {0, 0, 0, 0}
+        static struct option long_options[] =
+        {
+            {"device", required_argument, 0, 50},
+            {"no-pec", no_argument,       &noPec, 1},
+            {"address",  required_argument, 0, 'a'},
+            {"command",  required_argument, 0, 'c'},
+            {"write",    required_argument, 0, 'w'},
+            {"block-write", no_argument, 0, 'b'},
+            {"read",    required_argument, 0, 'r'},
+            {"null-write",  no_argument, 0, 'n'},
+            {"verbose",  no_argument, 0, 'v'},
+            {0, 0, 0, 0}
         };
 
-      int option_index = 0;
+        int option_index = 0;
 
-      c = getopt_long (argc, argv, "a:c:w:r:vnb", //s
-                       long_options, &option_index);
+        c = getopt_long (argc, argv, "a:c:w:r:vnb", //s
+                        long_options, &option_index);
 
-      if (c == -1)
-        break;
-
-      switch (c)
-        {
-        case 0:
-          if (long_options[option_index].flag != 0)
+        if (c == -1)
             break;
 
+        switch (c)
+        {
+        case 0:
+            if (long_options[option_index].flag != 0)
+                break;
+
         case 'a':
-          	opAddress = strtol(optarg,NULL,16);
-          break;
+            opAddress = strtol(optarg,NULL,16);
+            break;
         case 'b':
-		forceBlockWrite=1;
-	  break;
+            forceBlockWrite=1;
+            break;
         case 'c':
-		opCommand = strtol(optarg,NULL,16);
-          break;
+            opCommand = strtol(optarg,NULL,16);
+            break;
 
         case 'w':
-		op=1;
-		strcpy(block,optarg);
-          break;
+            op=1;
+            strcpy(block,optarg);
+            break;
 
         case 'r':
-		op=2;
-          	opReadLen=strtol(optarg,NULL,10);
-          break;
-	case 'n':
-		op=3;
-	  break;
-	case 'v':
-		verbose=1;
-	  break;
+            op=2;
+            opReadLen=strtol(optarg,NULL,10);
+            break;
+        case 'n':
+            op=3;
+            break;
+        case 'v':
+            verbose=1;
+            break;
+        case 50:
+            device = optarg;
+            break;
         case '?':
-		printUsage();
-		exit(0);
-          break;
+            printUsage();
+            exit(0);
+            break;
         default:
-	  abort;
+            abort;
         }
     }
 
 	if (verbose) printHeader();	
 
-	if ((status = /*SMBOpenDeviceVIDPID(0x04b4,0x8613)*/ SMBOpenDeviceI2c("/dev/i2c-7")) >= 0) {
+    if ((status = SMBOpenDevice(device)) >= 0) {
 		if (verbose) printf("SMBusb Firmware Version: %d.%d.%d\n",status&0xFF,(status >>8)&0xFF,(status >>16)&0xFF);
 	} else {
 		printf("Error Opening SMBusb: libusb error %d\n",status);

@@ -39,6 +39,7 @@
 #  include <linux/i2c.h>
 #endif
 #include "libsmbusb.h"
+#include "smbusb_priv.h"
 
 #include <strings.h>
 #include <stdbool.h>
@@ -88,29 +89,7 @@ static int xioctl(int fd, unsigned long int req, void *arg)
 
 void (*extLogFunc)(unsigned char* buf, unsigned int len) = NULL;
 
-void logerror(const char *format, ...)
-{
-#if 0
-	if (extLogFunc == NULL) return;
-	va_list ap;
-	va_start(ap, format);
-	char *outpBuf = malloc(10240);
-	vsnprintf(outpBuf,10240,format,ap);
-#endif
-}
-
-
-int SMBOpenDeviceVIDPID(unsigned int vid, unsigned int pid)
-{
-	return -1;
-}
-
-int SMBOpenDeviceBusAddr(unsigned int bus, unsigned int addr)
-{
-	return -1;
-}
-
-int SMBOpenDeviceI2c(const char *dev_name)
+static int I2CDEV_SMBOpenDeviceI2c(const char *dev_name)
 {
 	s_ctx.fd = open(dev_name, O_RDWR);
 	if (s_ctx.fd < 0)
@@ -165,7 +144,7 @@ int SMBOpenDeviceI2c(const char *dev_name)
 	return 0;
 }
 
-void SMBCloseDevice()
+static void I2CDEV_SMBCloseDevice(void)
 {
 	close(s_ctx.fd);
 	s_ctx.fd = -1;
@@ -450,11 +429,7 @@ static int smbus_write_block_data_relax(int fd, uint8_t address, uint8_t command
     buffer[0] = command;
     buffer[1] = length;
 
-//#ifdef __STDC_LIB_EXT1__
-//    memcpy_s(&buffer[2], sizeof(buffer)-2, values, length);
-//#else
     memcpy(&buffer[2], values, length);
-//#endif
 
     // Command write transaction
     msg[0].addr = address>>1;
@@ -471,9 +446,8 @@ static int smbus_write_block_data_relax(int fd, uint8_t address, uint8_t command
     return 0;
 }
 
-int SMBReadByte(unsigned int address, unsigned char command)
+static int I2CDEV_SMBReadByte(unsigned int address, unsigned char command)
 {
-#if 1
 	int ret = smbus_address(s_ctx.fd, address);
 	if (ret < 0)
         return ret;
@@ -499,57 +473,11 @@ int SMBReadByte(unsigned int address, unsigned char command)
 #endif
 
 	return smbus_read_byte_data(s_ctx.fd, command);
-#else
-	int ret=0;
 
-	uint8_t pec = 0;
-	
-	uint8_t outbuf[1] = {};
-	uint8_t inbuf[2] = {};
-    struct i2c_msg msgs[2];
-    struct i2c_rdwr_ioctl_data msgset[1];
-
-	size_t in_len = s_ctx.pec_enabled ? 2 : 1;
-
-    msgs[0].addr = address>>1;
-    msgs[0].flags = 0; /* I2C_M_TEN for 10 bits */
-    msgs[0].len = 1;
-    msgs[0].buf = outbuf;
-
-    msgs[1].addr = address>>1;
-    msgs[1].flags = I2C_M_RD | /*I2C_M_NOSTART |*/ 0;
-    msgs[1].len = in_len;
-    msgs[1].buf = (uint8_t*)(inbuf);
-
-    msgset[0].msgs = msgs;
-    msgset[0].nmsgs = 2;
-
-    outbuf[0] = command;
-
-    ret = xioctl(s_ctx.fd, I2C_RDWR, &msgset);
-
-	if (ret < 0)
-		return ret;
-
-
-	if (s_ctx.pec_enabled) {
-		pec = pec_crc(pec, address);
-		pec = pec_crc(pec, command);
-		pec = pec_crc(pec, address+1);
-		pec = pec_crc(pec, inbuf[0]);
-		if (pec != inbuf[1]) {
-			fprintf(stderr, "PEC CRC failed\n");
-			return -1;
-		}
-	}
-
-	return inbuf[0];
-#endif
 }
 
-int SMBSendByte(unsigned int address, unsigned char command)
+static int I2CDEV_SMBSendByte(unsigned int address, unsigned char command)
 {
-#if 1
 	int ret = smbus_address(s_ctx.fd, address);
 	if (ret < 0)
 		return ret;
@@ -559,153 +487,37 @@ int SMBSendByte(unsigned int address, unsigned char command)
     }
 
 	return smbus_write_byte(s_ctx.fd, command);
-#else
-	uint8_t outbuf[1] = {command};
-
-    struct i2c_msg msgs[1];
-    struct i2c_rdwr_ioctl_data msgset[1];
-
-	size_t in_len = s_ctx.pec_enabled ? 2 : 1;
-
-    msgs[0].addr = address>>1;
-    msgs[0].flags = 0; /* I2C_M_TEN for 10 bits */
-    msgs[0].len = 1;
-    msgs[0].buf = outbuf;
-
-    msgset[0].msgs = msgs;
-    msgset[0].nmsgs = 1;
-
-    return xioctl(s_ctx.fd, I2C_RDWR, &msgset);
-#endif
 }
 
 
-int SMBWriteByte(unsigned int address, unsigned char command, unsigned char data)
+static int I2CDEV_SMBWriteByte(unsigned int address, unsigned char command, unsigned char data)
 {
-#if 1
 	int ret = smbus_address(s_ctx.fd, address);
 	if (ret < 0)
 		return ret;
 	return smbus_write_byte_data(s_ctx.fd, command, data);
-#else
-	int ret=0;
-
-	uint8_t pec = 0;
-
-	uint8_t outbuf[] = {command, data, 0};
-    struct i2c_msg msgs[1];
-    struct i2c_rdwr_ioctl_data msgset[1];
-
-    msgs[0].addr = address>>1;
-    msgs[0].flags = 0; /* I2C_M_TEN for 10 bits */
-    msgs[0].len = sizeof(outbuf) - (s_ctx.pec_enabled ? 0 : 1);
-    msgs[0].buf = outbuf;
-
-    msgset[0].msgs = msgs;
-    msgset[0].nmsgs = 1;
-
-	if (s_ctx.pec_enabled) {
-		pec = pec_crc(pec, address);
-		pec = pec_crc(pec, command);
-		pec = pec_crc(pec, data);
-		outbuf[2] = pec;
-	}
-
-    return xioctl(s_ctx.fd, I2C_RDWR, &msgset);
-#endif
 }
 
 
-int SMBReadWord(unsigned int address, unsigned char command)
+static int I2CDEV_SMBReadWord(unsigned int address, unsigned char command)
 {
-#if 1
 	int ret = smbus_address(s_ctx.fd, address);
 	if (ret < 0)
 		return ret;
 	return smbus_read_word_data(s_ctx.fd, command);
-#else
-	int ret=0;
-
-	uint8_t pec = 0;
-
-	uint8_t outbuf[] = {command};
-	uint8_t inbuf[3] = {};
-    struct i2c_msg msgs[2];
-    struct i2c_rdwr_ioctl_data msgset[1];
-
-	const size_t in_len = sizeof(inbuf) -  (s_ctx.pec_enabled ? 0 : 1);
-
-    msgs[0].addr = address>>1;
-    msgs[0].flags = 0; /* I2C_M_TEN for 10 bits */
-    msgs[0].len = sizeof(outbuf);
-    msgs[0].buf = outbuf;
-
-    msgs[1].addr = address>>1;
-    msgs[1].flags = I2C_M_RD | /*I2C_M_NOSTART |*/ 0;
-    msgs[1].len = in_len;
-    msgs[1].buf = (uint8_t*)(inbuf);
-
-    msgset[0].msgs = msgs;
-    msgset[0].nmsgs = 2;
-
-    ret = xioctl(s_ctx.fd, I2C_RDWR, &msgset);
-
-	if (ret < 0)
-		return ret;
-
-	if (s_ctx.pec_enabled) {
-		pec = pec_crc(pec, address);
-		pec = pec_crc(pec, command);
-		pec = pec_crc(pec, address+1);
-		pec = pec_crc(pec, inbuf[0]);
-		pec = pec_crc(pec, inbuf[1]);
-		if (pec != inbuf[2]) {
-			fprintf(stderr, "PEC CRC failed\n");
-			return -1;
-		}
-	}
-
-	return inbuf[0] | (inbuf[1] << 8);
-#endif
 }
 
-int SMBWriteWord(unsigned int address, unsigned char command, unsigned int data)
+static int I2CDEV_SMBWriteWord(unsigned int address, unsigned char command, unsigned int data)
 {
-#if 1
 	int ret = smbus_address(s_ctx.fd, address);
 	if (ret < 0)
 		return ret;
 
 	return smbus_write_word_data(s_ctx.fd, command, data);
-#else
-	uint8_t pec = 0;
-
-	uint8_t outbuf[] = {command, data & 0xFF, (data>>8 & 0xFF), 0};
-    struct i2c_msg msgs[1];
-    struct i2c_rdwr_ioctl_data msgset[1];
-
-    msgs[0].addr = address>>1;
-    msgs[0].flags = 0; /* I2C_M_TEN for 10 bits */
-    msgs[0].len = sizeof(outbuf) - (s_ctx.pec_enabled ? 0 : 1);
-    msgs[0].buf = outbuf;
-
-    msgset[0].msgs = msgs;
-    msgset[0].nmsgs = 1;
-
-	if (s_ctx.pec_enabled) {
-		pec = pec_crc(pec, address);
-		pec = pec_crc(pec, command);
-		pec = pec_crc(pec, data & 0xFF);
-		pec = pec_crc(pec, (data >> 8) & 0xFF);
-		outbuf[3] = pec;
-	}
-
-    return xioctl(s_ctx.fd, I2C_RDWR, &msgset);
-#endif
 }
 
 
-int SMBReadBlock(unsigned int address, unsigned char command, unsigned char *data)
+static int I2CDEV_SMBReadBlock(unsigned int address, unsigned char command, unsigned char *data)
 {
 #if 0
     int ret = smbus_address(s_ctx.fd, address);
@@ -719,7 +531,7 @@ int SMBReadBlock(unsigned int address, unsigned char command, unsigned char *dat
 #endif
 }
 
-int SMBWriteBlock(unsigned int address, unsigned char command, unsigned char *data, unsigned char len)
+static int I2CDEV_SMBWriteBlock(unsigned int address, unsigned char command, unsigned char *data, unsigned char len)
 {
 #if 0
     int ret = smbus_address(s_ctx.fd, address);
@@ -733,121 +545,29 @@ int SMBWriteBlock(unsigned int address, unsigned char command, unsigned char *da
 }
 
 
-unsigned char SMBGetLastReadPECFail()
+static unsigned char I2CDEV_SMBGetLastReadPECFail()
 {
 	// TBD
 	return 0;
 }
 
-void SMBEnablePEC(unsigned char state)
+static void I2CDEV_SMBEnablePEC(unsigned char state)
 {
 	smbus_pec(s_ctx.fd, !!state);
 }
 
-int SMBWrite(unsigned char start, unsigned char restart, unsigned char stop, unsigned char *data, unsigned int len)
+static int I2CDEV_SMBWrite(unsigned char start, unsigned char restart, unsigned char stop, unsigned char *data, unsigned int len)
 {
-#if 1
 	return -1;
-#else
-	int status,i,wholeWrites,remainder;
-	unsigned char rs;	
-
-	wholeWrites = len / 64;
-	remainder = len-wholeWrites*64;
-
-	rs=0;
-
-	if (start) rs |= SMB_WRITE_CMD_START_FIRST;
-	if (restart) rs |= SMB_WRITE_CMD_RESTART_FIRST;
-
-	i=0;
-
-	while (i<wholeWrites) {
-		if ((i==wholeWrites-1) && (remainder==0) && (stop)) rs |= SMB_WRITE_CMD_STOP_AFTER;
-		status = libusb_control_transfer(device,
-						LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-						SMB_WRITE,
-						64, 
-						rs,
-						(void*)(data+(i*64)), 
-						64, 
-						100);
-		rs &= ~SMB_WRITE_CMD_START_FIRST;
-		rs &= ~SMB_WRITE_CMD_RESTART_FIRST;
-
-		if (status < 64) return status;
-
-		i++;
-	}
-	 
-       	if (remainder>0) { 
-		if (stop) rs |= SMB_WRITE_CMD_STOP_AFTER;
-		status = libusb_control_transfer(device,
-						LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-						SMB_WRITE,
-						remainder, 
-						rs,
-						(void*)(data+(wholeWrites*64)), 
-						remainder, 
-						100);		
-	}
-	if (status >0) { return len; } else { return status; }
-#endif
 }
 
-int SMBRead(unsigned int len, unsigned char* data, unsigned char lastRead)
+static int I2CDEV_SMBRead(unsigned int len, unsigned char* data, unsigned char lastRead)
 {
-#if 1
 	return -1;
-#else
-	int status,i,wholeReads,remainder;
-	unsigned char rs;	
-	
-	wholeReads = len / 64;
-	remainder = len-wholeReads*64;
-//	printf("wholeReads:%d, remainder:%d\n",wholeReads,remainder);
-	
-	rs=0;
-
-	rs |= SMB_READ_CMD_FIRST_READ;
-	i=0;
-	while (i<wholeReads) {
-		if ((lastRead) && (i==wholeReads-1) && (remainder == 0)) rs |= SMB_READ_CMD_LAST_READ;
-		status = libusb_control_transfer(device,
-						LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-						SMB_READ,
-						64, 
-						rs,
-						(void*)(data+(i*64)), 
-						64, 
-						100);		
-		
-		rs &= ~SMB_READ_CMD_FIRST_READ;
-//               	printf("wholeRead:%d, status:%d\n",i,status);
-		if (status<64) return status;		
-		i++;
-	}
-
-	if (remainder >0) {
-		if (lastRead) {
-			rs |= SMB_READ_CMD_LAST_READ;
-		}
-		status = libusb_control_transfer(device,
-						LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-						SMB_READ,
-						remainder, 
-						rs,
-						(void*)(data+(wholeReads*64)), 
-						remainder, 
-						100);		
-	}	
-//            	printf("remainder:%d, status:%d\n",i,status);
-	return status;
-#endif
 }
 
 
-int SMBTransfer(struct SMBMsg *msgs, size_t count)
+static int I2CDEV_SMBTransfer(struct SMBMsg *msgs, size_t count)
 {
     struct i2c_msg *i2c_msgs = calloc(count, sizeof(struct i2c_msg));
 
@@ -883,12 +603,12 @@ int SMBTransfer(struct SMBMsg *msgs, size_t count)
     return sts;
 }
 
-unsigned int SMBGetArbPEC()
+static unsigned int I2CDEV_SMBGetArbPEC()
 {
 	return -1;
 }
 
-int SMBTestAddressACK(unsigned int address)
+static int I2CDEV_SMBTestAddressACK(unsigned int address)
 {
 	int ret = smbus_address(s_ctx.fd, address);
 	if (ret)
@@ -896,7 +616,7 @@ int SMBTestAddressACK(unsigned int address)
 	return smbus_write_quick(s_ctx.fd, 0);
 }
 
-int SMBTestCommandACK(unsigned int address, unsigned char command)
+static int I2CDEV_SMBTestCommandACK(unsigned int address, unsigned char command)
 {
 	int ret = smbus_address(s_ctx.fd, address);
 	if (ret)
@@ -904,7 +624,7 @@ int SMBTestCommandACK(unsigned int address, unsigned char command)
 	return smbus_write_byte(s_ctx.fd, command);
 }
 
-int SMBTestCommandWrite(unsigned int address, unsigned char command)
+static int I2CDEV_SMBTestCommandWrite(unsigned int address, unsigned char command)
 {
 	int result = 0;
 	int sts;
@@ -929,9 +649,7 @@ int SMBTestCommandWrite(unsigned int address, unsigned char command)
     struct i2c_msg msgs[1];
     struct i2c_rdwr_ioctl_data msgset[1];
 
-	int i;
-
-	for (i = 0; i < sizeof(size_checks); ++i) {
+    for (unsigned i = 0; i < sizeof(size_checks); ++i) {
 		msgs[0].addr = address>>1;
 		msgs[0].flags = 0; /* I2C_M_TEN for 10 bits */
 		msgs[0].len = size_checks[i];
@@ -950,7 +668,42 @@ int SMBTestCommandWrite(unsigned int address, unsigned char command)
 }
 
 
-void SMBSetDebugLogFunc(void *logFunc)
+static void I2CDEV_SMBSetDebugLogFunc(void *logFunc)
 {
 	extLogFunc = logFunc;
 }
+
+
+static int I2CDEV_Open(const char *device_ops)
+{
+    // device_ops is a file name, like /dev/i2c-7
+    const char* fileName = device_ops;
+    if (!fileName) {
+        fprintf(stderr, "I2CDEV: device file name is not provided\n");
+        return -1;
+    }
+    return I2CDEV_SMBOpenDeviceI2c(fileName);
+}
+
+
+struct SMBDriver smbusb_i2cdev_driver = {
+    .SMBOpen = I2CDEV_Open,
+    .SMBClose = I2CDEV_SMBCloseDevice,
+    .SMBReadByte = I2CDEV_SMBReadByte,
+    .SMBSendByte = I2CDEV_SMBSendByte,
+    .SMBWriteByte = I2CDEV_SMBWriteByte,
+    .SMBReadWord = I2CDEV_SMBReadWord,
+    .SMBWriteWord = I2CDEV_SMBWriteWord,
+    .SMBReadBlock = I2CDEV_SMBReadBlock,
+    .SMBWriteBlock = I2CDEV_SMBWriteBlock,
+    .SMBGetLastReadPECFail = I2CDEV_SMBGetLastReadPECFail,
+    .SMBEnablePEC = I2CDEV_SMBEnablePEC,
+    .SMBWrite = I2CDEV_SMBWrite,
+    .SMBRead = I2CDEV_SMBRead,
+    .SMBTransfer = I2CDEV_SMBTransfer,
+    .SMBGetArbPEC = I2CDEV_SMBGetArbPEC,
+    .SMBTestAddressACK = I2CDEV_SMBTestAddressACK,
+    .SMBTestCommandACK = I2CDEV_SMBTestCommandACK,
+    .SMBTestCommandWrite = I2CDEV_SMBTestCommandWrite,
+    .SMBSetDebugLogFunc = I2CDEV_SMBSetDebugLogFunc,
+};

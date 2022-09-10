@@ -7,7 +7,8 @@ endif()
 project(smbusb)
 
 # Options
-set(DISABLE_FIRMWARE ON CACHE BOOL "Enable FX2 firmware building (Linux only)")
+set(DISABLE_FIRMWARE ON  CACHE BOOL "Don't build the firmware, use pre-built one")
+set(DISABLE_TOOLS    OFF CACHE BOOL "Don't build the tools")
 
 # where to look first for cmake modules, before ${CMAKE_ROOT}/modules/ is checked
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules)
@@ -31,13 +32,44 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 #     $<$<CXX_COMPILER_ID:MSVC>:
 #       /W4>)
 
-# TBD: check sdcc
+
+add_subdirectory(lib)
+if (NOT DISABLE_TOOLS)
+    add_subdirectory(tools)
+else()
+    message(STATUS "Tools will not be built")
+endif()
+
+# Build firmware and attach it to the librate pre-build command
 if (NOT DISABLE_FIRMWARE)
     find_program(XXD xxd REQUIRED)
     find_program(SDCC sdcc REQUIRED)
-    # TBD: sdcc --version 2>&1 | grep "mcs51"
 
+    # Check for msc51
+    execute_process(
+        COMMAND ${SDCC} --version
+        COMMAND grep mcs51
+        OUTPUT_FILE sdcc_version
+        ERROR_FILE sdcc_version
+        RESULT_VARIABLE SDCC_MSC51_SUPPORT
+    )
+
+    if (NOT ${SDCC_MSC51_SUPPORT} EQUAL 0)
+        message(FATAL_ERROR "SDCC does not support msc51 target")
+    endif()
+
+    execute_process(COMMAND patch -d ${CMAKE_CURRENT_SOURCE_DIR}/fx2lib -p1 -sN
+                    INPUT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/fx2lib.patch)
+
+    # Target from the lib sub directory
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/lib/firmware.h
+        COMMAND make ARGS -C ${CMAKE_CURRENT_SOURCE_DIR}/firmware all
+        VERBATIM
+    )
+    add_custom_target(firmware DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/lib/firmware.h)
+    add_dependencies(smbusb firmware)
+else()
+    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/firmware/firmware.h DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/lib)
+    message(STATUS "Using pre-built firmware")
 endif()
-
-add_subdirectory(lib)
-add_subdirectory(tools)

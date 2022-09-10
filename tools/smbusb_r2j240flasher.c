@@ -255,6 +255,13 @@ void printHeader() {
 void printUsage() {
 	  printHeader();
 	  printf("options:\n");
+      printf("--device=<device_uri>                  = use given device for SMBus access: fx2lp, i2cdev\n"
+             "      <device_uri> contain:\n"
+             "        <schema>://<device_definition>\n"
+             "      Example:\n"
+             "        i2cdev:///dev/i2c-7\n"
+             "        i2c:///dev/i2c-7\n"
+             "        fx2lp://vid=0x04b4,pid=0x8613\n");
 	  printf("--dump=<file> ,  -d <file>              =   dump the ram (or flash, which is mapped in ram) to <file>\n");
 	  printf("--write=<file> ,   -w <file>            =   write the <file> to the ram (or flash)\n");
 	  printf("--erase                                 =   just erase the flash block\n");
@@ -330,6 +337,8 @@ int main(int argc, char **argv)
 	FILE *outFile;
 	FILE *inFile;
 
+    const char *device = "fx2lp://vid=0x04b4,pid=0x8613";
+
 	if (argc==1) {
 		 printUsage();
 		 exit(1);
@@ -338,12 +347,13 @@ int main(int argc, char **argv)
 	while (1)
 	{
 		static struct option long_options[] =
-	        {
+            {
+              {"device", required_argument, 0, 50},
 	          {"confirm-delete", no_argument,       &confirmDelete, 1},
 	          {"no-verify", no_argument,       &noVerify, 1},
-	          {"execute",  no_argument, &opExecute,1},
-		  {"erase",  no_argument,&opErase,1},
-		  {"fix-lgc-static-checksum", no_argument, &lgcChecksumFix,1},
+              {"execute",  no_argument, &opExecute,1},
+            {"erase",  no_argument,&opErase,1},
+            {"fix-lgc-static-checksum", no_argument, &lgcChecksumFix,1},
 
 	          {"address",    required_argument, 0, 'a'},
 	          {"dump",	required_argument, 0, 'd'},
@@ -401,7 +411,10 @@ int main(int argc, char **argv)
 		}
 
 
-	  break;
+      break;
+    case 50:
+        device = optarg;
+        break;
         case 's':
           	opSize=strtol(optarg,NULL,16);
           break;
@@ -416,7 +429,7 @@ int main(int argc, char **argv)
     }
 
 	printHeader();	
-	if ((status = /*SMBOpenDeviceVIDPID(0x04b4,0x8613)*/ SMBOpenDeviceI2c("/dev/i2c-7")) >= 0) {
+    if ((status = SMBOpenDevice(device)) >= 0) {
 		printf("SMBusb Firmware Version: %d.%d.%d\n",status&0xFF,(status >>8)&0xFF,(status >>16)&0xFF);
 	} else {
 			

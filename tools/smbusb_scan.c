@@ -66,6 +66,13 @@ void printHeader() {
 void printUsage() {
 	  printHeader();
 	  printf("options:\n");
+      printf("--device=<device_uri>                  = use given device for SMBus access: fx2lp, i2cdev\n"
+             "      <device_uri> contain:\n"
+             "        <schema>://<device_definition>\n"
+             "      Example:\n"
+             "        i2cdev:///dev/i2c-7\n"
+             "        i2c:///dev/i2c-7\n"
+             "        fx2lp://vid=0x04b4,pid=0x8613\n");
 	  printf("--address                , -a                  =   scan for address ACK (START, ADDR, STOP)\n");
 	  printf("--command <addr>         , -c <addr>           =   scan for command ACK (START, ADDR, CMD, STOP)\n");
 	  printf("--command-write <addr>   , -w <addr>           =   probe command writability for byte, word, block or more\n");
@@ -108,6 +115,8 @@ int main(int argc, char **argv)
 	int c,i;
 	unsigned char *token;
 
+    const char *device = "fx2lp://vid=0x04b4,pid=0x8613";
+
 	if (argc==1) {
 		 printUsage();
 		 exit(1);
@@ -116,7 +125,8 @@ int main(int argc, char **argv)
 	while (1)
 	{
 		static struct option long_options[] =
-	        {
+            {
+              {"device", required_argument, 0, 50},
 	          {"address", no_argument,       0, 'a'},
 	          {"command", required_argument,       0, 'c'},
 	 	  {"command-write", required_argument, 0,'w'},		
@@ -140,6 +150,9 @@ int main(int argc, char **argv)
         {
         case 0:
           if (long_options[option_index].flag != 0)
+            break;
+        case 50:
+            device = optarg;
             break;
 	case 'a':
 		scanMode = SCAN_ADDRESS;		
@@ -176,7 +189,7 @@ int main(int argc, char **argv)
 
 	printHeader();	
 
-	if ((status = /*SMBOpenDeviceVIDPID(0x04b4,0x8613)*/ SMBOpenDeviceI2c("/dev/i2c-7")) >= 0) {
+    if ((status = SMBOpenDevice(device)) >= 0) {
 		printf("SMBusb Firmware Version: %d.%d.%d\n",status&0xFF,(status >>8)&0xFF,(status >>16)&0xFF);
 	} else {
 		printf("Error Opening SMBusb: libusb error: %d\n",status);

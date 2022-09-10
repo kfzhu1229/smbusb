@@ -1,511 +1,218 @@
-/*
-* Copyright (c) 2016 Viktor <github@karosium.e4ward.com>
-*
-* This library is free software; you can redistribute it and/or
-* modify it under the terms of the GNU Lesser General Public
-* License as published by the Free Software Foundation; either
-* version 2.1 of the License, or (at your option) any later version.
-*
-* This library is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-* Lesser General Public License for more details.
-*
-* You should have received a copy of the GNU Lesser General Public
-* License along with this library; if not, write to the Free Software
-* Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
-*/
-
-#include <unistd.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdint.h>
 #include <stdarg.h>
-#include <sys/types.h>
+#include <string.h>
+#include <stdio.h>
 
-#include "libusb.h"
-#include "fxloader.h"
 #include "libsmbusb.h"
+#include "smbusb_priv.h"
 
-#include "firmware.h"
-#include <strings.h>
 
-static libusb_device *dev, **devs;
-static libusb_device_handle *device = NULL;
+extern struct SMBDriver smbusb_fx2lp_driver;
+extern struct SMBDriver smbusb_i2cdev_driver;
 
-void (*extLogFunc)(unsigned char* buf, unsigned int len) = NULL;
+static struct SMBDriver *s_drv = NULL;
 
-void logerror(const char *format, ...)
+int SMBOpenDevice(const char *device_uri)
 {
-	if (extLogFunc == NULL) return;
-	va_list ap;
-	va_start(ap, format);
-	char *outpBuf = malloc(10240);
-	vsnprintf(outpBuf,10240,format,ap);
-}
+    int status = 0;
+    const char *device_ops = NULL;
 
-int InitDevice(){
-	int status;
-	unsigned int fwver=0;
-	/* We need to claim the first interface */
-	libusb_set_auto_detach_kernel_driver(device, 1);
-	status = libusb_claim_interface(device, 0);
-	if (status != LIBUSB_SUCCESS) {
-		libusb_close(device);
-		logerror("libusb_claim_interface failed: %s\n", libusb_error_name(status));
-		return ERR_CLAIM_INTERFACE;
-	}
+    if (s_drv) {
+        fprintf(stderr, "Driver/Device already opened\n");
+        return -1;
+    }
 
-	if (SMBInterfaceID() != 0x4d5355) 
-	{
-		// try loading firmware
-		if (CypressUploadIhxFirmware(device, (char *)&build_smbusb_firmware_ihx, build_smbusb_firmware_ihx_len) <0) return ERR_FIRMWARE_DOWNLOAD;
-		sleep(2);	
-		return INIT_RETRY;
-	}
+    if (!strncmp(device_uri, "fx2lp://", 8)) {
+        s_drv = &smbusb_fx2lp_driver;
+        device_ops = device_uri + 8; // skip "fx2lp://"
+    } else if (!strncmp(device_uri, "i2cdev://", 9)) {
+        s_drv = &smbusb_i2cdev_driver;
+        device_ops = device_uri + 9; // skip "i2cdev://"
+    } else if (!strncmp(device_uri, "i2c://", 6)) {
+        s_drv = &smbusb_i2cdev_driver;
+        device_ops = device_uri + 6; // skip "i2c://"
+    } else {
+        fprintf(stderr, "Unsupported device URI: \"%s\"\n", device_uri);
+        return -1;
+    }
 
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_FIRMWARE_VERSION,
-					0, 
-					0,
-					(void*)&fwver, 
-					3, 
-					1000);
-  	if (status==3) {return fwver;} else {return ERR_FIRMWARE_DOWNLOAD;}
-}
+    status = s_drv->SMBOpen(device_ops);
+    if (status < 0)
+        s_drv = NULL;
 
-int SMBOpenDeviceVIDPID(unsigned int vid,unsigned int pid){
-	int status;
-	if (device != NULL) return ERR_ALREADY_OPEN;
-
-
-	status = libusb_init(NULL);
-	if (status < 0) {
-		logerror("libusb_init() failed: %s\n", libusb_error_name(status));
-		return -1;
-	}
-	libusb_set_debug(NULL, 0);
-	
-	openvidpid_retry:
-	device = libusb_open_device_with_vid_pid(NULL, (uint16_t)vid, (uint16_t)pid);
-		if (device == NULL) {
-			logerror("libusb_open() failed\n");
-			return ERR_DEVICE_OPEN;		
-		}	
-	status = InitDevice();
-	if (status == INIT_RETRY) goto openvidpid_retry;
-	return status;
-}
-
-int SMBOpenDeviceBusAddr(unsigned int bus, unsigned int addr){
-	int i,status;
-	
-	if (device != NULL) return ERR_ALREADY_OPEN;
-
-	status = libusb_init(NULL);
-	if (status < 0) {
-		logerror("libusb_init() failed: %s\n", libusb_error_name(status));
-		return -1;
-	}
-	libusb_set_debug(NULL, 0);
-
-
-	openbusadd_retry:
-	if (libusb_get_device_list(NULL, &devs) < 0) {
-		logerror("libusb_get_device_list() failed: %s\n", libusb_error_name(status));
-		return ERR_DEVICE_OPEN;
-	}
-	for (i=0; (dev=devs[i]) != NULL; i++) {
-		if ((libusb_get_bus_number(dev) == bus) && (libusb_get_device_address(dev) == addr)) {
-			status = libusb_open(dev, &device);
-			libusb_free_device_list(devs, 1);
-			if (status < 0) {
-				logerror("libusb_open() failed: %s\n", libusb_error_name(status));
-				return -2;
-			}				
-			status = InitDevice();
-			if (status == INIT_RETRY) goto openbusadd_retry;
-			return status;
-		}
-	}
-	return -1;
-}
-
-void SMBCloseDevice() {
-	if (device == NULL) return;
-	libusb_release_interface(device, 0);
-	libusb_close(device);
-	libusb_exit(NULL);
-	device=NULL;
-}
-
-unsigned int SMBInterfaceID() {
-	unsigned int magic=0;
-	int status;
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_INTERFACE_ID,
-					0, 
-					0,
-					(void*)&magic, 
-					3, 
-					100);
-	if ((status <=0) | (magic != 0x4d5355)) {
-		return 0;	
-	} else {
-		return magic;
-	}	
-}
-
-int SMBReadByte(unsigned int address, unsigned char command) {
-	int status, ret=0;
-	
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_READ_BYTE,
-					address, 
-					command,
-					(void*)&ret, 
-					1, 
-					100);
-	if (status==1) { return ret;} else {return status;}
-}
-
-int SMBSendByte(unsigned int address, unsigned char command) {
-	int status, ret=0;
-	
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_SEND_BYTE,
-					address, 
-					command,
-					(void*)&ret, 
-					1, 
-					100);
-	return status;
+    return status;
 }
 
 
-int SMBWriteByte(unsigned int address, unsigned char command, unsigned char data) {
-	int status, ret=0;
-	
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_WRITE_BYTE,
-					address, 
-					command,
-					&data, 
-					1, 
-					100);
-	if (status==1) { return ret;} else {return status;}
+void SMBCloseDevice(void)
+{
+    if (!s_drv)
+        return;
+    s_drv->SMBClose();
 }
 
-
-int SMBReadWord(unsigned int address, unsigned char command) {
-	int status, ret=0;
-	
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_READ_WORD,
-					address, 
-					command,
-					(void*)&ret, 
-					2, 
-					100);
-	if (status==2) { return ret;} else {return status;}
+int SMBSendByte(unsigned int address, unsigned char command)
+{
+    return !s_drv ? -1 : s_drv->SMBSendByte(address, command);
 }
 
-int SMBWriteWord(unsigned int address, unsigned char command, unsigned int data) {
-	int status, ret=0;
-	
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_WRITE_WORD,
-					address, 
-					command,
-					(void*)&data, 
-					2, 
-					100);
-	if (status==2) { return ret;} else {return status;}
+int SMBReadByte(unsigned int address, unsigned char command)
+{
+    return !s_drv ? -1 : s_drv->SMBReadByte(address, command);
 }
 
-
-int SMBReadBlock(unsigned int address, unsigned char command, unsigned char *data) {
-	int status, rcvd=0, total = 0;
-	unsigned char *tmp = malloc(64);
-
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_READ_BLOCK,
-					address, 
-					command,
-					(void*)tmp, 
-					64, 
-					100);
-
-	if (status <=0) {
-		 free(tmp);
-		 return status;
-	}
-	total = tmp[0];
-	rcvd+=status-1;
-
-	memcpy(data,tmp+1,rcvd);
-	
-	while (rcvd < total) {
-		
-		status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_READ_BLOCK,
-					address, 
-					command,
-					(void*)tmp, 
-					64, 
-					100);
-
-		if (status <0) {
-			 free(tmp);
-			 return status;
-		}
-		memcpy(data+rcvd,tmp,status);
-		rcvd+=status;
-	}
-		
-	free(tmp);
-	return total;
+int SMBWriteByte(unsigned int address, unsigned char command, unsigned char data)
+{
+    return !s_drv ? -1 : s_drv->SMBWriteByte(address, command, data);
 }
 
-int SMBWriteBlock(unsigned int address, unsigned char command, unsigned char *data, unsigned char len) {
-	int status, i=0, wholeWrites=0, remainder=0;
-	unsigned char *tmp = malloc(256);
-	
-	wholeWrites = (len+1) / 64;
-	remainder = (len+1) - wholeWrites*64;
-
-	tmp[0]=len;
-	memcpy(tmp+1,data,len);
-
-	while (i<wholeWrites) {
-		status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_WRITE_BLOCK,
-					address, 
-					command,
-					(void*)(tmp+(i*64)), 
-					64, 
-					100);		
-		if (status != 64) {
-			free(tmp);
-			return status;
-		}
-		i++;
-	}
-
-	if (remainder>0) {
-		status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_WRITE_BLOCK,
-					address, 
-					command,
-					(void*)(tmp+(wholeWrites*64)), 
-					remainder, 
-					100);	
-		if (status != remainder) {
-			free(tmp);
-			return status;
-		}
-	}
-	
-	free(tmp);
-	return len;			
+int SMBReadWord(unsigned int address, unsigned char command)
+{
+    return !s_drv ? -1 : s_drv->SMBReadWord(address, command);
 }
 
-
-unsigned char SMBGetLastReadPECFail() {
-	int status;
-	unsigned char pec_failed=0;
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_GET_CLEAR_PEC_FAIL,
-					1, 
-					0,
-					(void*)&pec_failed, 
-					1, 
-					100);
-
-	if (status==1) { return pec_failed;} else return status;	
+int SMBWriteWord(unsigned int address, unsigned char command, unsigned int data)
+{
+    return !s_drv ? -1 : s_drv->SMBWriteWord(address, command, data);
 }
 
-void SMBEnablePEC(unsigned char state) {
-		libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_ENABLE_PEC,
-					state>0?1:0, 
-					0,
-					NULL, 
-					0, 
-					100);
+int SMBReadBlock(unsigned int address, unsigned char command, unsigned char *data)
+{
+    return !s_drv ? -1 : s_drv->SMBReadBlock(address, command, data);
 }
 
-int SMBWrite(unsigned char start, unsigned char restart, unsigned char stop, unsigned char *data, unsigned int len) {
-	int status,i,wholeWrites,remainder;
-	unsigned char rs;	
-
-	wholeWrites = len / 64;
-	remainder = len-wholeWrites*64;
-
-	rs=0;
-
-	if (start) rs |= SMB_WRITE_CMD_START_FIRST;
-	if (restart) rs |= SMB_WRITE_CMD_RESTART_FIRST;
-
-	i=0;
-
-	while (i<wholeWrites) {
-		if ((i==wholeWrites-1) && (remainder==0) && (stop)) rs |= SMB_WRITE_CMD_STOP_AFTER;
-		status = libusb_control_transfer(device,
-						LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-						SMB_WRITE,
-						64, 
-						rs,
-						(void*)(data+(i*64)), 
-						64, 
-						100);
-		rs &= ~SMB_WRITE_CMD_START_FIRST;
-		rs &= ~SMB_WRITE_CMD_RESTART_FIRST;
-
-		if (status < 64) return status;
-
-		i++;
-	}
-	 
-       	if (remainder>0) { 
-		if (stop) rs |= SMB_WRITE_CMD_STOP_AFTER;
-		status = libusb_control_transfer(device,
-						LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-						SMB_WRITE,
-						remainder, 
-						rs,
-						(void*)(data+(wholeWrites*64)), 
-						remainder, 
-						100);		
-	}
-	if (status >0) { return len; } else { return status; }
-	
+int SMBWriteBlock(unsigned int address, unsigned char command, unsigned char *data, unsigned char len)
+{
+    return !s_drv ? -1 : s_drv->SMBWriteBlock(address, command, data, len);
 }
 
-int SMBRead(unsigned int len, unsigned char* data, unsigned char lastRead) {
-	int status,i,wholeReads,remainder;
-	unsigned char rs;	
-	
-	wholeReads = len / 64;
-	remainder = len-wholeReads*64;
-//	printf("wholeReads:%d, remainder:%d\n",wholeReads,remainder);
-	
-	rs=0;
-
-	rs |= SMB_READ_CMD_FIRST_READ;
-	i=0;
-	while (i<wholeReads) {
-		if ((lastRead) && (i==wholeReads-1) && (remainder == 0)) rs |= SMB_READ_CMD_LAST_READ;
-		status = libusb_control_transfer(device,
-						LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-						SMB_READ,
-						64, 
-						rs,
-						(void*)(data+(i*64)), 
-						64, 
-						100);		
-		
-		rs &= ~SMB_READ_CMD_FIRST_READ;
-//               	printf("wholeRead:%d, status:%d\n",i,status);
-		if (status<64) return status;		
-		i++;
-	}
-
-	if (remainder >0) {
-		if (lastRead) {
-			rs |= SMB_READ_CMD_LAST_READ;
-		}
-		status = libusb_control_transfer(device,
-						LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-						SMB_READ,
-						remainder, 
-						rs,
-						(void*)(data+(wholeReads*64)), 
-						remainder, 
-						100);		
-	}	
-//            	printf("remainder:%d, status:%d\n",i,status);
-	return status;
+void SMBEnablePEC(unsigned char state)
+{
+    !s_drv ? (void)0 : s_drv->SMBEnablePEC(state);
 }
 
-unsigned int SMBGetArbPEC() {
-	int status;
-	short pecs=0;
-	status = libusb_control_transfer(device,
-					LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-					SMB_GET_MRQ_PECS,
-					2, 
-					0,
-					(void*)&pecs, 
-					2, 
-					100);
-
-	if (status==2) { return pecs;} else return status;
-	
+unsigned char SMBGetLastReadPECFail(void)
+{
+    return !s_drv ? 0x00 : s_drv->SMBGetLastReadPECFail();
 }
 
-int SMBTestAddressACK(unsigned int address) {
-	int status;
-	unsigned char res;
-
-	status = libusb_control_transfer(device,
-				LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-				SMB_TEST_ADDRESS_ACK,
-				address, 
-				0,
-				(void*)&res, 
-				1, 
-				200);
-
-	if (status ==1) { return res; } else {return status;}
-
-}
-int SMBTestCommandACK(unsigned int address, unsigned char command){
-	int status;
-	unsigned char res;
-	status = libusb_control_transfer(device,
-				LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-				SMB_TEST_COMMAND_ACK,
-				address, 
-				command,
-				(void*)&res, 
-				1, 
-				100);
-
-	if (status ==1) { return res; } else {return status;}
-
-}
-int SMBTestCommandWrite(unsigned int address, unsigned char command){
-	int status;
-	unsigned char res;
-	status = libusb_control_transfer(device,
-				LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-				SMB_TEST_COMMAND_WRITE,
-				address, 
-				command,
-				(void*)&res, 
-				1, 
-				100);
-
-	if (status ==1) { return res; } else {return status;}
+int SMBWrite(unsigned char start, unsigned char restart, unsigned char stop, unsigned char *data, unsigned int len)
+{
+    return !s_drv ? -1 : s_drv->SMBWrite(start, restart, stop, data, len);
 }
 
+int SMBRead(unsigned int len, unsigned char* data, unsigned char lastRead)
+{
+    return !s_drv ? -1 : s_drv->SMBRead(len, data, lastRead);
+}
 
+unsigned int SMBGetArbPEC(void)
+{
+    return !s_drv ? 0 : s_drv->SMBGetArbPEC();
+}
 
-void SMBSetDebugLogFunc(void *logFunc) {
-	extLogFunc = logFunc;
+int SMBTestAddressACK(unsigned int address)
+{
+    return !s_drv ? -1 : s_drv->SMBTestAddressACK(address);
+}
+
+int SMBTestCommandACK(unsigned int address, unsigned char command)
+{
+    return !s_drv ? -1 : s_drv->SMBTestCommandACK(address, command);
+}
+
+int SMBTestCommandWrite(unsigned int address, unsigned char command)
+{
+    return !s_drv ? -1 : s_drv->SMBTestCommandWrite(address, command);
+}
+
+void SMBSetDebugLogFunc(void *logFunc)
+{
+    !s_drv ? (void)0 : s_drv->SMBSetDebugLogFunc(logFunc);
+}
+
+int SMBTransfer(struct SMBMsg *msgs, size_t count)
+{
+    return !s_drv ? -1 : s_drv->SMBTransfer(msgs, count);
+}
+
+struct OptDict OptDictProcess(const char *driver_ops)
+{
+    struct OptDict result = {};
+
+    result.storage = strdup(driver_ops);
+    if (!result.storage)
+        return result;
+
+    char *saveptr1, *saveptr2;
+    char *token, *subtoken, *str1, *str2;
+
+    for (str1 = result.storage; ;str1 = NULL) {
+        token = strtok_r(str1, ",", &saveptr1);
+        if (!token)
+            break;
+
+        result.count++;
+        struct OptDictItem *items = realloc(result.items, sizeof(*result.items) * result.count);
+        if (!items)
+            goto cleanup;
+        result.items = items;
+
+        struct OptDictItem *item = &result.items[result.count-1];
+        memset(item, 0, sizeof(*item));
+
+        for (str2 = token; ; str2 = NULL) {
+            subtoken = strtok_r(str2, "=", &saveptr2);
+            if (!subtoken)
+                break;
+
+            if (!item->key) {
+                item->key = subtoken;
+            } else {
+                if (!item->val)
+                    item->val = subtoken;
+                else
+                    subtoken[-1] = '=';
+            }
+        }
+    }
+
+    return result;
+
+cleanup:
+    free(result.storage);
+    return (struct OptDict){};
+}
+
+void OptDictRelease(struct OptDict *dict)
+{
+    free(dict->items);
+    free(dict->storage);
+    dict->items = NULL;
+    dict->storage = NULL;
+    dict->count = 0;
+}
+
+int GetNumBase(const char *numStr)
+{
+    size_t len = strlen(numStr);
+    if (!len)
+        return 10;
+
+    // 0x0
+    if (len >= 3 && numStr[0] == 0 && (numStr[1] == 'x' || numStr[1] == 'X'))
+        return 16;
+
+    // 0b0
+    if (len >= 3 && numStr[0] == 0 && (numStr[1] == 'b' || numStr[1] == 'B'))
+        return 2;
+
+    // 00
+    if (len >= 2 && (numStr[0] == 0 && numStr[len - 1] != 'h'))
+        return 8;
+
+    // 00h
+    if (len >= 2 && numStr[len-1] == 'h')
+        return 16;
+
+    return 10;
 }

@@ -1,3 +1,28 @@
+diff --git a/include/serial.h b/include/serial.h
+index 7cdd4d7..5c3008c 100644
+--- a/include/serial.h
++++ b/include/serial.h
+@@ -51,5 +51,5 @@ void sio0_init( DWORD baud_rate ) __critical ; // baud_rate max should be 57600
+  putchar('\\n') or putchar('\\r') both transmit \\r\\n
+  Just use one or the other. (This makes terminal echo easy)
+ **/
+-void putchar(char c);
+-char getchar();
++int putchar(int c);
++int getchar(void);
+diff --git a/lib/Makefile b/lib/Makefile
+index 560c500..8fb9834 100644
+--- a/lib/Makefile
++++ b/lib/Makefile
+@@ -24,7 +24,7 @@ LIBS = fx2.lib
+ all: $(LIBS)
+ 
+ $(LIBS): $(FX2_OBJS)
+-	sdcclib fx2.lib $?
++	sdar -rc fx2.lib $?
+ 
+ usbav.rel: usbav.a51
+ 	$(AS8051) -logs usbav.a51
 diff --git a/lib/fx2.mk b/lib/fx2.mk
 index d876a6d..c404ce0 100644
 --- a/lib/fx2.mk
@@ -18,3 +43,35 @@ index d876a6d..c404ce0 100644
  BUILDDIR?=build
  
  FX2LIBDIR?=$(dir $(lastword $(MAKEFILE_LIST)))../
+diff --git a/lib/serial.c b/lib/serial.c
+index ce98b2c..88863a2 100644
+--- a/lib/serial.c
++++ b/lib/serial.c
+@@ -69,7 +69,7 @@ void sio0_init( DWORD baud_rate ) __critical { // baud_rate max should be 57600
+ 
+ }
+ 
+-char getchar() {
++int getchar(void) {
+   char c;
+   while (!RI)
+     ;  
+@@ -78,15 +78,16 @@ char getchar() {
+   return c;
+ }
+ 
+-void _transchar(char c) {
++void _transchar(int c) {
+  while ( !TI ); // wait for TI=1 
+  TI=0;
+  SBUF0=c;
+ }
+ 
+-void putchar (char c) {
++int putchar (int c) {
+   if (c=='\n') _transchar('\r'); // transmit \r\n
+   _transchar(c);  
+   if (c == '\r' ) _transchar('\n'); // transmit \r\n
++  return c;
+ }
+ 
