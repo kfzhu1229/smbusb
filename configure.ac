@@ -61,6 +61,26 @@ AC_ARG_ENABLE([firmware],
     SMB_CONF_DIRS="firmware $SMB_CONF_DIRS"
 ])
 
+AC_ARG_ENABLE([fx2lp],
+    AS_HELP_STRING([--disable-fx2lp], [Disable FX2LP probe driver]), [
+      case "${enableval}" in
+        yes) _fx2lp=true ;;
+        no)  _fx2lp=false ;;
+        *) AC_MSG_ERROR([bad value ${enableval} for --enable-fx2lp]) ;;
+      esac
+    ], [_fx2lp=true])
+AM_CONDITIONAL([ENABLE_FX2LP], [test x$_fx2lp = xtrue])
+
+AC_ARG_ENABLE([i2cdev],
+    AS_HELP_STRING([--disable-i2cdev], [Disable i2c-dev probe driver]), [
+      case "${enableval}" in
+        yes) _i2cdev=true ;;
+        no)  _i2cdev=false ;;
+        *) AC_MSG_ERROR([bad value ${enableval} for --enable-i2cdev]) ;;
+      esac
+    ], [_i2cdev=true])
+AM_CONDITIONAL([ENABLE_I2CDEV], [test x$_i2cdev = xtrue])
+
 AC_ARG_ENABLE([tools],
     AS_HELP_STRING([--disable-tools], [Don't build the tools]))
 

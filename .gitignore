@@ -1,3 +1,6 @@
+*.lo
+*.la
+*.o
 aclocal.m4
 compile
 config.guess
@@ -5,12 +8,14 @@ config.log
 config.status
 config.sub
 configure
+configure~
 depcomp
 install-sh
 libtool
 ltmain.sh
 missing
 lib/.deps
+lib/.libs
 lib/Makefile
 lib/Makefile.in
 firmware/build/
@@ -19,3 +24,10 @@ Makefile.in
 lib/libsmbusb.pc
 autom4te.cache/
 tools/.deps/
+tools/.libs/
+tools/smbusb_bq8030flasher
+tools/smbusb_comm
+tools/smbusb_m37512flasher
+tools/smbusb_r2j240flasher
+tools/smbusb_sbsreport
+tools/smbusb_scan

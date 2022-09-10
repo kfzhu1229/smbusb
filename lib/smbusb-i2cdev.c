@@ -87,7 +87,7 @@ static int xioctl(int fd, unsigned long int req, void *arg)
     return ret;
 }
 
-void (*extLogFunc)(unsigned char* buf, unsigned int len) = NULL;
+static void (*extLogFunc)(unsigned char* buf, unsigned int len) = NULL;
 
 static int I2CDEV_SMBOpenDeviceI2c(const char *dev_name)
 {
