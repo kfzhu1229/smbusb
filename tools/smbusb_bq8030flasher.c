@@ -239,7 +239,7 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-    if ((status = SMBOpenDevice(device)) >0) {
+    if ((status = SMBOpenDevice(device)) >= 0) {
 		printf("SMBusb Firmware Version: %d.%d.%d\n",status&0xFF,(status >>8)&0xFF,(status >>16)&0xFF);
 	} else {
 		printf("Error Opening SMBusb: libusb error %d\n",status);
