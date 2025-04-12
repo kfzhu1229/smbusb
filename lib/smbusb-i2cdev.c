@@ -371,17 +371,12 @@ static int smbus_read_block_data_relax(int fd, uint8_t address, uint8_t command,
     msg[1].addr = address>>1;
     msg[1].flags = I2C_M_RD;
     msg[1].buf = buffer;
-    msg[1].len = 1; // read only size field
+    // THIS below is assuming the data block size being at most 64
+    // Original implementation consists of reading the size field first, and then transmit
+    // another message reading the data block. Instead it seemed to always lose one byte of data!!
+    msg[1].len = 65; // read NOT only size field, but size + data block
 
     int sts = xioctl(fd, I2C_RDWR, &req);
-    if (sts < 0) {
-        fprintf(stderr, "smbus_read_block_data_relax: error %d\n", errno);
-        return -1;
-    }
-
-    //msg[1].len = buffer[0] + (s_ctx.pec_enabled ? 1 : 0);
-    msg[1].len = buffer[0];
-    sts = xioctl(fd, I2C_RDWR, &req);
     if (sts < 0) {
         fprintf(stderr, "smbus_read_block_data_relax: error %d\n", errno);
         return -1;
@@ -439,7 +434,7 @@ static int smbus_write_block_data_relax(int fd, uint8_t address, uint8_t command
 
     int sts = xioctl(fd, I2C_RDWR, &req);
     if (sts < 0) {
-        fprintf(stderr, "smbus_read_block_data_relax: error %d\n", errno);
+        fprintf(stderr, "smbus_write_block_data_relax: error %d\n", errno);
         return -1;
     }
 

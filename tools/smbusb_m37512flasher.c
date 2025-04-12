@@ -95,12 +95,13 @@ int readFlash(int address, int len, unsigned char* buf) {
 		setAddr[1] = ((address+i*CHUNKLEN) >> 8) & 0xFF;	
 
 		status=SMBWriteBlock(0x16,CMD_SET_READ_ADDRESS,setAddr,2);
-		if (status != 2) return -1;
+		if (status < 0) return -1;
 
 		status=SMBReadBlock(0x16,CMD_READ_BLOCK,chunk);		
 
-		if (status != CHUNKLEN) return status;
+		// if (status != CHUNKLEN) return 0-status;
 		memcpy((buf+(i*CHUNKLEN)),chunk,CHUNKLEN);
+		printf("Current status: %d; Current i: %d out of %d\n", status, i, len/CHUNKLEN);
 	}	
 	
 	return len;
@@ -121,7 +122,8 @@ int writeFlash(int address, int len, unsigned char* buf) {
 		status=SMBWriteBlock(0x16,CMD_WRITE_BLOCK,chunk,CHUNKLEN+2);		
 		usleep(2000);
 
-		if (status != CHUNKLEN+2) return status;		
+		//if (status != CHUNKLEN+2) return status;
+		if (status < 0) return status;
 	}	
 	
 	return len;
@@ -314,7 +316,9 @@ int main(int argc, char **argv)
 	SMBEnablePEC(0);  // Renesas BootROM does not support PEC :(
 
 	memset(block,0,255);			
+	printf("Trying a sample SBS Chemistry read\n");
 	status = SMBReadBlock(0x16,CMD_SBS_CHEMISTRY,block); // read SBS Chemistry.. should return "LION" if running firmware
+	printf("It's normal this errors out\n");
 
 	if (status == 4) {
 		printf("Error communicating with the Boot ROM.\nChip is running firmware\n");		
@@ -386,10 +390,10 @@ int main(int argc, char **argv)
 
 		printf("Erasing flash block starting at 0x%04x ...\n",opAddress);
 
-		if (eraseFlashBlock(opAddress)>0) {
+		if (eraseFlashBlock(opAddress)>=0) {
 			printf("Done!\n");
 		} else {
-			printf("ERROR!\n");
+			printf("ERROR! Error code: %d\n", eraseFlashBlock(opAddress));
 			exit(0);
 		}
 
@@ -429,10 +433,10 @@ int main(int argc, char **argv)
 			exit(0);
 		}
 		printf("Erasing flash block starting at 0x%04x ...\n",opAddress);
-		if (eraseFlashBlock(opAddress)>0) {
+		if (eraseFlashBlock(opAddress)>=0) {
 			printf("Done!\n");
 		} else {
-			printf("ERROR!\n");
+			printf("ERROR! Error code: %d\n", eraseFlashBlock(opAddress));
 			exit(0);
 		}
 	}
