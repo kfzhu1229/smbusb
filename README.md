@@ -1,4 +1,10 @@
 # smbusb
+### Current status of the project:
+
+* Project is forked from h4tr3d/smbusb
+* M37512flasher has been fixed to work on CP2112, with a different block read algorithm implemented!
+* BQ8030flasher right now is unmodified from that, has MAJOR ISSUES with random firmware erases with read operations, DO NOT CONNECT a BQ8030 in boot mode for now!
+* R2J240flasher and everything else of this project are unmodified and mostly working as they should!
 
 SMBusb is a USB SMBus interface based on the Cypress FX2LP.
 This repository contains the firmware and library (libsmbusb) that make up the interface. 
